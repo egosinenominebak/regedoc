@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocRegex - Advanced Text/PDF Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.5.141/pdf.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .editor-container {
+            height: calc(100vh - 200px);
+        }
+        .pdf-viewer {
+            height: calc(100vh - 250px);
+            overflow-y: auto;
+            background-color: #f0f0f0;
+        }
+        .pdf-page {
+            margin-bottom: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            background: white;
+        }
+        .cm-editor {
+            height: 100%;
+        }
+        .search-highlight {
+            background-color: rgba(255, 255, 0, 0.5);
+        }
+        .regex-highlight {
+            background-color: rgba(0, 255, 255, 0.3);
+            border-bottom: 2px dashed #00ffff;
+        }
+        .tab-active {
+            border-bottom: 3px solid #3b82f6;
+            color: #3b82f6;
+            font-weight: 600;
+        }
+        #dropZone {
+            border: 3px dashed #ccc;
+            transition: all 0.3s;
+        }
+        #dropZone.drag-over {
+            border-color: #3b82f6;
+            background-color: #f0f7ff;
+        }
+        .line-numbers {
+            width: 40px;
+            text-align: right;
+            padding-right: 8px;
+            padding-top: 4px;
+            font-family: monospace;
+            font-size: 14px;
+            color: #888;
+            border-right: 1px solid #ddd;
+            background-color: #f8f8f8;
+            user-select: none;
+            overflow: hidden;
+        }
+        .editor-with-line-numbers {
+            display: flex;
+            flex-direction: row;
+            height: 100%;
+            overflow: hidden;
+        }
+        .text-editor-wrapper {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        .text-highlight-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            white-space: pre;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            padding: 4px;
+            color: transparent;
+            overflow: hidden;
+        }
+        .dark-mode {
+            background-color: #1a1a1a;
+            color: #f0f0f0;
+        }
+        .dark-mode .bg-white {
+            background-color: #2a2a2a;
+        }
+        .dark-mode .bg-gray-50 {
+            background-color: #1a1a1a;
+        }
+        .dark-mode .bg-gray-100 {
+            background-color: #333;
+        }
+        .dark-mode .text-gray-800 {
+            color: #e0e0e0;
+        }
+        .dark-mode .text-gray-600 {
+            color: #b0b0b0;
+        }
+        .dark-mode .border-gray-300 {
+            border-color: #555;
+        }
+        .dark-mode #textEditor {
+            background-color: #2a2a2a;
+            color: #f0f0f0;
+        }
+        .dark-mode .line-numbers {
+            background-color: #333;
+            color: #aaa;
+            border-color: #555;
+        }
+        .autosave-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .autosave-indicator.visible {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-6">
+        <!-- Header -->
+        <header class="flex justify-between items-center mb-6">
+            <div class="flex items-center">
+                <i class="fas fa-file-alt text-blue-500 text-3xl mr-3"></i>
+                <h1 class="text-2xl font-bold text-gray-800">DocRegex Editor</h1>
+            </div>
+            <div class="flex space-x-2">
+                <button id="darkModeToggle" class="p-2 rounded-full hover:bg-gray-200">
+                    <i class="fas fa-moon text-gray-600"></i>
+                </button>
+                <button id="fullscreenToggle" class="p-2 rounded-full hover:bg-gray-200">
+                    <i class="fas fa-expand text-gray-600"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="bg-white rounded-lg shadow-lg overflow-hidden">
+            <!-- Toolbar -->
+            <div class="bg-gray-100 px-4 py-3 flex flex-wrap items-center justify-between border-b">
+                <div class="flex space-x-2 mb-2 sm:mb-0">
+                    <button id="newFile" class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 flex items-center">
+                        <i class="fas fa-file mr-2"></i> New
+                    </button>
+                    <div class="relative">
+                        <input type="file" id="fileInput" accept=".txt,.pdf" class="hidden">
+                        <button id="openFile" class="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 flex items-center">
+                            <i class="fas fa-folder-open mr-2"></i> Open
+                        </button>
+                    </div>
+                    <button id="saveFile" class="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 flex items-center">
+                        <i class="fas fa-save mr-2"></i> Save
+                    </button>
+                </div>
+                <div class="flex space-x-2">
+                    <button id="undoBtn" class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded">
+                        <i class="fas fa-undo"></i>
+                    </button>
+                    <button id="redoBtn" class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded">
+                        <i class="fas fa-redo"></i>
+                    </button>
+                    <div class="border-l border-gray-300 mx-2"></div>
+                    <button id="findBtn" class="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 flex items-center">
+                        <i class="fas fa-search mr-2"></i> Find
+                    </button>
+                    <button id="replaceBtn" class="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 flex items-center">
+                        <i class="fas fa-exchange-alt mr-2"></i> Replace
+                    </button>
+                </div>
+            </div>
+
+            <!-- Search/Replace Panel -->
+            <div id="searchPanel" class="hidden bg-gray-50 p-4 border-b">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="flex-grow">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Find:</label>
+                        <div class="flex">
+                            <input id="searchInput" type="text" class="flex-grow px-3 py-2 border border-gray-300 rounded-l focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button id="searchPrev" class="px-3 py-2 bg-gray-200 border border-l-0 border-gray-300 hover:bg-gray-300">
+                                <i class="fas fa-arrow-up"></i>
+                            </button>
+                            <button id="searchNext" class="px-3 py-2 bg-gray-200 border border-l-0 border-gray-300 rounded-r hover:bg-gray-300">
+                                <i class="fas fa-arrow-down"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex-grow">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Replace:</label>
+                        <div class="flex">
+                            <input id="replaceInput" type="text" class="flex-grow px-3 py-2 border border-gray-300 rounded-l">
+                            <button id="replaceBtnAction" class="px-3 py-2 bg-blue-500 text-white border border-blue-500 hover:bg-blue-600 rounded-r">
+                                Replace
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex items-end space-x-2">
+                        <div class="flex items-center">
+                            <input id="regexCheckbox" type="checkbox" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="regexCheckbox" class="ml-2 block text-sm text-gray-700">Regex</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input id="caseSensitiveCheckbox" type="checkbox" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="caseSensitiveCheckbox" class="ml-2 block text-sm text-gray-700">Case</label>
+                        </div>
+                        <button id="replaceAllBtn" class="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600">
+                            Replace All
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="flex border-b">
+                <button id="textTab" class="px-4 py-2 font-medium tab-active">
+                    <i class="fas fa-align-left mr-2"></i>Text Editor
+                </button>
+                <button id="pdfTab" class="px-4 py-2 font-medium text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-file-pdf mr-2"></i>PDF Viewer
+                </button>
+                <div class="ml-auto px-4 py-2 text-sm text-gray-500">
+                    <span id="charCount">0</span> chars |
+                    <span id="wordCount">0</span> words |
+                    <span id="lineCount">0</span> lines
+                </div>
+            </div>
+
+            <!-- Editor/Viewer Area -->
+            <div id="dropZone" class="editor-container relative">
+                <!-- Text Editor -->
+                <div id="textEditorContainer" class="h-full">
+                    <div class="editor-with-line-numbers">
+                        <div id="lineNumbers" class="line-numbers"></div>
+                        <div class="text-editor-wrapper">
+                            <textarea id="textEditor" class="w-full h-full p-4 font-mono text-gray-800 focus:outline-none resize-none" spellcheck="false"></textarea>
+                            <div id="textHighlightLayer" class="text-highlight-layer"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PDF Viewer -->
+                <div id="pdfViewerContainer" class="pdf-viewer hidden p-4">
+                    <div id="pdfContainer" class="flex flex-col items-center">
+                        <div class="text-center py-10 text-gray-500">
+                            <i class="fas fa-file-pdf text-5xl mb-4"></i>
+                            <p class="text-xl">No PDF file loaded</p>
+                            <p class="text-sm mt-2">Open a PDF file to view it here</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Drop Zone Overlay -->
+                <div id="dropOverlay" class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden">
+                    <div class="bg-white p-8 rounded-lg text-center">
+                        <i class="fas fa-file-upload text-5xl text-blue-500 mb-4"></i>
+                        <h3 class="text-xl font-bold mb-2">Drop files here</h3>
+                        <p class="text-gray-600">Upload .txt or .pdf files to edit</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="bg-gray-100 px-4 py-2 mt-2 rounded-b-lg text-sm text-gray-600 flex justify-between items-center">
+            <div>
+                <span id="fileName">Untitled.txt</span>
+                <span id="fileSize" class="ml-2">-</span>
+            </div>
+            <div>
+                <span id="cursorPosition">Ln 1, Col 1</span>
+                <span id="fileType" class="ml-2">Plain Text</span>
+            </div>
+        </div>
+
+        <!-- Regex Help Modal -->
+        <div id="regexHelpModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+                <div class="flex justify-between items-center border-b px-6 py-4">
+                    <h3 class="text-xl font-bold">Regex Help</h3>
+                    <button id="closeRegexHelp" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="p-6">
+                    <div class="mb-6">
+                        <h4 class="font-bold text-lg mb-3 text-blue-600">Common Regex Patterns</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">\d</p>
+                                <p class="text-sm text-gray-600">Any digit (0-9)</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">\w</p>
+                                <p class="text-sm text-gray-600">Word character (a-z, A-Z, 0-9, _)</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">\s</p>
+                                <p class="text-sm text-gray-600">Whitespace (space, tab, newline)</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">.</p>
+                                <p class="text-sm text-gray-600">Any character except newline</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">[abc]</p>
+                                <p class="text-sm text-gray-600">Any of a, b, or c</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">[^abc]</p>
+                                <p class="text-sm text-gray-600">Not a, b, or c</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">^</p>
+                                <p class="text-sm text-gray-600">Start of line</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">$</p>
+                                <p class="text-sm text-gray-600">End of line</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-6">
+                        <h4 class="font-bold text-lg mb-3 text-blue-600">Quantifiers</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">*</p>
+                                <p class="text-sm text-gray-600">0 or more</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">+</p>
+                                <p class="text-sm text-gray-600">1 or more</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">?</p>
+                                <p class="text-sm text-gray-600">0 or 1</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">{3}</p>
+                                <p class="text-sm text-gray-600">Exactly 3</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">{3,}</p>
+                                <p class="text-sm text-gray-600">3 or more</p>
+                            </div>
+                            <div class="bg-gray-50 p-3 rounded">
+                                <p class="font-mono text-sm mb-1">{3,5}</p>
+                                <p class="text-sm text-gray-600">3, 4, or 5</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h4 class="font-bold text-lg mb-3 text-blue-600">Examples</h4>
+                        <div class="space-y-3">
+                            <div class="bg-blue-50 p-3 rounded border border-blue-100">
+                                <p class="font-mono text-sm mb-1">\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b</p>
+                                <p class="text-sm text-gray-600">Email addresses (case insensitive)</p>
+                            </div>
+                            <div class="bg-blue-50 p-3 rounded border border-blue-100">
+                                <p class="font-mono text-sm mb-1">\b\d{3}[-.]?\d{3}[-.]?\d{4}\b</p>
+                                <p class="text-sm text-gray-600">Phone numbers (various formats)</p>
+                            </div>
+                            <div class="bg-blue-50 p-3 rounded border border-blue-100">
+                                <p class="font-mono text-sm mb-1">https?://[^\s]+</p>
+                                <p class="text-sm text-gray-600">URLs (http or https)</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-gray-50 px-6 py-3 border-t flex justify-end">
+                    <button id="insertRegex" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                        Insert Regex
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="autosaveIndicator" class="autosave-indicator">
+        <i class="fas fa-save mr-2"></i> Autosaving...
+    </div>
+
+    <script>
+        // Initialize PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.5.141/pdf.worker.min.js';
+
+        // DOM Elements
+        const textEditor = document.getElementById('textEditor');
+        const textEditorContainer = document.getElementById('textEditorContainer');
+        const pdfViewerContainer = document.getElementById('pdfViewerContainer');
+        const pdfContainer = document.getElementById('pdfContainer');
+        const textTab = document.getElementById('textTab');
+        const pdfTab = document.getElementById('pdfTab');
+        const searchPanel = document.getElementById('searchPanel');
+        const searchInput = document.getElementById('searchInput');
+        const replaceInput = document.getElementById('replaceInput');
+        const regexCheckbox = document.getElementById('regexCheckbox');
+        const caseSensitiveCheckbox = document.getElementById('caseSensitiveCheckbox');
+        const findBtn = document.getElementById('findBtn');
+        const replaceBtn = document.getElementById('replaceBtn');
+        const searchPrev = document.getElementById('searchPrev');
+        const searchNext = document.getElementById('searchNext');
+        const replaceBtnAction = document.getElementById('replaceBtnAction');
+        const replaceAllBtn = document.getElementById('replaceAllBtn');
+        const fileInput = document.getElementById('fileInput');
+        const openFile = document.getElementById('openFile');
+        const newFile = document.getElementById('newFile');
+        const saveFile = document.getElementById('saveFile');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const fileType = document.getElementById('fileType');
+        const cursorPosition = document.getElementById('cursorPosition');
+        const charCount = document.getElementById('charCount');
+        const wordCount = document.getElementById('wordCount');
+        const lineCount = document.getElementById('lineCount');
+        const dropZone = document.getElementById('dropZone');
+        const dropOverlay = document.getElementById('dropOverlay');
+        const regexHelpModal = document.getElementById('regexHelpModal');
+        const closeRegexHelp = document.getElementById('closeRegexHelp');
+        const insertRegex = document.getElementById('insertRegex');
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        const fullscreenToggle = document.getElementById('fullscreenToggle');
+        const undoBtn = document.getElementById('undoBtn');
+        const redoBtn = document.getElementById('redoBtn');
+        const lineNumbers = document.getElementById('lineNumbers');
+        const textHighlightLayer = document.getElementById('textHighlightLayer');
+        const autosaveIndicator = document.getElementById('autosaveIndicator');
+
+        // State variables
+        let currentFile = {
+            name: 'Untitled.txt',
+            type: 'text/plain',
+            content: '',
+            lastModified: new Date(),
+            size: 0
+        };
+        let searchActive = false;
+        let searchResults = [];
+        let currentSearchIndex = -1;
+        let undoStack = [];
+        let redoStack = [];
+        let isDarkMode = false;
+        let isFullscreen = false;
+        let autosaveTimer = null;
+        let pdfText = ''; // To store extracted text from PDF
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            updateCounts();
+            setupEventListeners();
+            setupDragAndDrop();
+            loadFromLocalStorage();
+            updateLineNumbers();
+            setupAutosave();
+        });
+
+        // Event Listeners
+        function setupEventListeners() {
+            // Tab switching
+            textTab.addEventListener('click', () => switchTab('text'));
+            pdfTab.addEventListener('click', () => switchTab('pdf'));
+
+            // Editor events
+            textEditor.addEventListener('input', handleEditorInput);
+            textEditor.addEventListener('keydown', handleEditorKeydown);
+            textEditor.addEventListener('scroll', syncScrollHighlight);
+            textEditor.addEventListener('click', updateCursorPosition);
+            textEditor.addEventListener('keyup', updateCursorPosition);
+
+            // Search functionality
+            findBtn.addEventListener('click', toggleSearchPanel);
+            replaceBtn.addEventListener('click', toggleReplacePanel);
+            searchInput.addEventListener('input', performSearch);
+            searchInput.addEventListener('keydown', handleSearchKeydown);
+            replaceInput.addEventListener('keydown', handleReplaceKeydown);
+            searchPrev.addEventListener('click', () => navigateSearch(-1));
+            searchNext.addEventListener('click', () => navigateSearch(1));
+            replaceBtnAction.addEventListener('click', replaceCurrent);
+            replaceAllBtn.addEventListener('click', replaceAll);
+
+            // File operations
+            openFile.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', handleFileSelect);
+            newFile.addEventListener('click', createNewFile);
+            saveFile.addEventListener('click', saveCurrentFile);
+
+            // UI interactions
+            darkModeToggle.addEventListener('click', toggleDarkMode);
+            fullscreenToggle.addEventListener('click', toggleFullscreen);
+            undoBtn.addEventListener('click', undo);
+            redoBtn.addEventListener('click', redo);
+            closeRegexHelp.addEventListener('click', () => regexHelpModal.classList.add('hidden'));
+            insertRegex.addEventListener('click', insertSelectedRegex);
+            regexCheckbox.addEventListener('change', () => {
+                if (searchInput.value) performSearch();
+            });
+            caseSensitiveCheckbox.addEventListener('change', () => {
+                if (searchInput.value) performSearch();
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                // Ctrl+F for find
+                if (e.ctrlKey && e.key === 'f') {
+                    e.preventDefault();
+                    toggleSearchPanel();
+                }
+                // Ctrl+H for replace
+                if (e.ctrlKey && e.key === 'h') {
+                    e.preventDefault();
+                    toggleReplacePanel();
+                }
+                // Ctrl+S for save
+                if (e.ctrlKey && e.key === 's') {
+                    e.preventDefault();
+                    saveCurrentFile();
+                }
+                // Ctrl+O for open
+                if (e.ctrlKey && e.key === 'o') {
+                    e.preventDefault();
+                    fileInput.click();
+                }
+                // Ctrl+N for new
+                if (e.ctrlKey && e.key === 'n') {
+                    e.preventDefault();
+                    createNewFile();
+                }
+                // Ctrl+Z for undo
+                if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+                    e.preventDefault();
+                    undo();
+                }
+                // Ctrl+Shift+Z or Ctrl+Y for redo
+                if ((e.ctrlKey && e.shiftKey && e.key === 'z') || (e.ctrlKey && e.key === 'y')) {
+                    e.preventDefault();
+                    redo();
+                }
+                // Escape to close search panel
+                if (e.key === 'Escape' && !searchPanel.classList.contains('hidden')) {
+                    e.preventDefault();
+                    clearSearch();
+                    searchPanel.classList.add('hidden');
+                    searchInput.blur();
+                }
+                // F1 for regex help
+                if (e.key === 'F1') {
+                    e.preventDefault();
+                    regexHelpModal.classList.remove('hidden');
+                }
+            });
+        }
+
+        // Drag and Drop
+        function setupDragAndDrop() {
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, unhighlight, false);
+            });
+
+            dropZone.addEventListener('drop', handleDrop, false);
+        }
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function highlight() {
+            dropOverlay.classList.remove('hidden');
+            dropZone.classList.add('drag-over');
+        }
+
+        function unhighlight() {
+            dropOverlay.classList.add('hidden');
+            dropZone.classList.remove('drag-over');
+        }
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+
+            if (files.length > 0) {
+                handleFileSelect({ target: { files } });
+            }
+        }
+
+        // Tab Management
+        function switchTab(tab) {
+            if (tab === 'text') {
+                textTab.classList.add('tab-active');
+                textTab.classList.remove('text-gray-500');
+                textTab.classList.add('text-gray-800');
+                pdfTab.classList.remove('tab-active');
+                pdfTab.classList.add('text-gray-500');
+                pdfTab.classList.remove('text-gray-800');
+                textEditorContainer.classList.remove('hidden');
+                pdfViewerContainer.classList.add('hidden');
+            } else {
+                pdfTab.classList.add('tab-active');
+                pdfTab.classList.remove('text-gray-500');
+                pdfTab.classList.add('text-gray-800');
+                textTab.classList.remove('tab-active');
+                textTab.classList.add('text-gray-500');
+                textTab.classList.remove('text-gray-800');
+                pdfViewerContainer.classList.remove('hidden');
+                textEditorContainer.classList.add('hidden');
+            }
+        }
+
+        // File Operations
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            currentFile = {
+                name: file.name,
+                type: file.type,
+                lastModified: file.lastModified,
+                size: file.size
+            };
+
+            fileName.textContent = currentFile.name;
+            fileSize.textContent = formatFileSize(currentFile.size);
+            fileType.textContent = file.type === 'application/pdf' ? 'PDF Document' : 'Plain Text';
+
+            const reader = new FileReader();
+            if (file.type === 'application/pdf') {
+                reader.onload = function(e) {
+                    loadPDF(e.target.result);
+                    switchTab('pdf');
+                };
+                reader.readAsDataURL(file);
+            } else {
+                reader.onload = function(e) {
+                    currentFile.content = e.target.result;
+                    textEditor.value = currentFile.content;
+                    updateCounts();
+                    switchTab('text');
+                    saveToLocalStorage();
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function loadPDF(data) {
+            pdfContainer.innerHTML = '<div class="text-center py-4"><i class="fas fa-spinner fa-spin text-2xl text-blue-500"></i><p class="mt-2">Loading PDF...</p></div>';
+
+            const loadingTask = pdfjsLib.getDocument(data);
+            loadingTask.promise.then(function(pdf) {
+                pdfContainer.innerHTML = '';
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    pdf.getPage(i).then(function(page) {
+                        const scale = 1.5;
+                        const viewport = page.getViewport({ scale: scale });
+
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+
+                        const pageDiv = document.createElement('div');
+                        pageDiv.className = 'pdf-page';
+                        pageDiv.appendChild(canvas);
+                        pdfContainer.appendChild(pageDiv);
+
+                        const renderContext = {
+                            canvasContext: context,
+                            viewport: viewport
+                        };
+
+                        page.render(renderContext);
+                    });
+                }
+
+                // Extract text from PDF
+                extractTextFromPDF(data).then(text => {
+                    pdfText = text;
+                });
+            }).catch(function(error) {
+                pdfContainer.innerHTML = '<div class="text-center py-10 text-red-500"><i class="fas fa-exclamation-triangle text-4xl mb-4"></i><p class="text-xl">Error loading PDF</p><p class="text-sm mt-2">' + error.message + '</p></div>';
+            });
+        }
+
+        function createNewFile() {
+            currentFile = {
+                name: 'Untitled.txt',
+                type: 'text/plain',
+                content: '',
+                lastModified: new Date(),
+                size: 0
+            };
+            textEditor.value = '';
+            fileName.textContent = currentFile.name;
+            fileSize.textContent = '-';
+            fileType.textContent = 'Plain Text';
+            updateCounts();
+            switchTab('text');
+            saveToLocalStorage();
+        }
+
+        function saveCurrentFile() {
+            currentFile.content = textEditor.value;
+            currentFile.size = new Blob([currentFile.content]).size;
+            currentFile.lastModified = new Date();
+
+            fileSize.textContent = formatFileSize(currentFile.size);
+
+            if (currentFile.name.endsWith('.txt') || currentFile.name === 'Untitled.txt') {
+                const blob = new Blob([currentFile.content], { type: 'text/plain' });
+                saveBlob(blob, currentFile.name);
+            } else if (currentFile.name.endsWith('.pdf')) {
+                alert('PDF editing is not supported. Please save as text file.');
+            }
+
+            saveToLocalStorage();
+        }
+
+        function saveBlob(blob, fileName) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+        }
+
+        // Search and Replace
+        function toggleSearchPanel() {
+            if (searchPanel.classList.contains('hidden')) {
+                searchPanel.classList.remove('hidden');
+                replaceInput.value = '';
+                searchInput.focus();
+            } else if (replaceInput.value === '') {
+                searchPanel.classList.add('hidden');
+                clearSearch();
+            }
+        }
+
+        function toggleReplacePanel() {
+            searchPanel.classList.remove('hidden');
+            searchInput.focus();
+        }
+
+        function performSearch() {
+            const searchText = searchInput.value;
+            if (!searchText) {
+                clearSearch();
+                return;
+            }
+
+            const text = textEditor.value;
+            const isRegex = regexCheckbox.checked;
+            const isCaseSensitive = caseSensitiveCheckbox.checked;
+            const flags = isCaseSensitive ? 'g' : 'gi';
+
+            try {
+                let regex;
+                if (isRegex) {
+                    regex = new RegExp(searchText, flags);
+                } else {
+                    regex = new RegExp(escapeRegExp(searchText), flags);
+                }
+
+                searchResults = [];
+                let match;
+                while ((match = regex.exec(text)) !== null) {
+                    searchResults.push({
+                        start: match.index,
+                        end: match.index + match[0].length,
+                        text: match[0]
+                    });
+                }
+
+                if (searchResults.length > 0) {
+                    currentSearchIndex = 0;
+                    highlightSearchResults();
+                    navigateSearch(0);
+                    searchActive = true;
+                } else {
+                    clearSearch();
+                    alert('No matches found');
+                }
+            } catch (e) {
+                alert('Invalid regular expression: ' + e.message);
+                clearSearch();
+            }
+        }
+
+        function highlightSearchResults() {
+            // Clear previous highlights
+            textHighlightLayer.innerHTML = '';
+
+            const text = textEditor.value;
+            let highlightedText = '';
+            let lastIndex = 0;
+
+            for (const result of searchResults) {
+                highlightedText += escapeHTML(text.substring(lastIndex, result.start));
+                highlightedText += `<span class="search-highlight">${escapeHTML(text.substring(result.start, result.end))}</span>`;
+                lastIndex = result.end;
+            }
+
+            highlightedText += escapeHTML(text.substring(lastIndex));
+
+            // Apply highlights to the highlight layer
+            textHighlightLayer.innerHTML = highlightedText;
+
+            // Ensure highlight layer is properly aligned with text editor content
+            textHighlightLayer.scrollTop = textEditor.scrollTop;
+        }
+
+        // Helper function to escape HTML special characters
+        function escapeHTML(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;")
+                .replace(/\n/g, "<br>")
+                .replace(/ /g, "&nbsp;")
+                .replace(/\t/g, "&nbsp;&nbsp;&nbsp;&nbsp;");
+        }
+
+        // --- ADDED FUNCTION DEFINITION ---
+        function clearSearchHighlights() {
+            // Clear the content of the highlight layer
+            if (typeof textHighlightLayer !== 'undefined') {
+                textHighlightLayer.innerHTML = '';
+            }
+        }
+        // --- END ADDED FUNCTION DEFINITION ---
+
+        function clearSearch() {
+            searchResults = [];
+            currentSearchIndex = -1;
+            searchActive = false;
+            clearSearchHighlights(); // Now this function exists
+        }
+
+        function navigateSearch(direction) {
+            if (searchResults.length === 0) return;
+
+            currentSearchIndex += direction;
+
+            if (currentSearchIndex >= searchResults.length) {
+                currentSearchIndex = 0;
+            } else if (currentSearchIndex < 0) {
+                currentSearchIndex = searchResults.length - 1;
+            }
+
+            const result = searchResults[currentSearchIndex];
+            scrollToResult(result);
+        }
+
+        function scrollToResult(result) {
+            // Calculate the line number of the result
+            const textUpToMatch = textEditor.value.substring(0, result.start);
+            const lineNumber = (textUpToMatch.match(/\n/g) || []).length + 1;
+            const lines = textUpToMatch.split('\n');
+            const columnNumber = lines[lines.length - 1].length + 1;
+
+            // Scroll to the position
+            const lineHeight = 20; // Approximate line height in pixels
+            const visibleLines = Math.floor(textEditor.clientHeight / lineHeight);
+            const targetScrollTop = Math.max(0, (lineNumber - Math.floor(visibleLines / 2)) * lineHeight);
+
+            textEditor.scrollTop = targetScrollTop;
+            textEditor.setSelectionRange(result.start, result.end);
+            textEditor.focus();
+
+            // Update cursor position display
+            cursorPosition.textContent = `Ln ${lineNumber}, Col ${columnNumber}`;
+        }
+
+        function replaceCurrent() {
+            if (currentSearchIndex === -1 || !searchActive) return;
+
+            const result = searchResults[currentSearchIndex];
+            const replaceText = replaceInput.value;
+            const text = textEditor.value;
+
+            textEditor.value = text.substring(0, result.start) + replaceText + text.substring(result.end);
+
+            // Update the search results after replacement
+            const lengthDiff = replaceText.length - (result.end - result.start);
+            searchResults.forEach((r, i) => {
+                if (r.start > result.start) {
+                    r.start += lengthDiff;
+                    r.end += lengthDiff;
+                }
+            });
+
+            // Perform the search again to update highlights and indices correctly
+            performSearch(); 
+            // Find the index corresponding to the replaced item's position
+            let nextIndex = -1;
+            for(let i=0; i < searchResults.length; i++){
+                if(searchResults[i].start >= result.start + replaceText.length){
+                    nextIndex = i;
+                    break;
+                }
+            }
+            // If a next result is found, navigate to it, otherwise stay put or go to start
+            if(nextIndex !== -1){
+                 currentSearchIndex = nextIndex;
+                 scrollToResult(searchResults[currentSearchIndex]);
+            } else if (searchResults.length > 0) {
+                 currentSearchIndex = 0;
+                 scrollToResult(searchResults[currentSearchIndex]);
+            } else {
+                 currentSearchIndex = -1; // No results left
+            }
+        }
+
+
+        function replaceAll() {
+            if (searchResults.length === 0 || !searchActive) return;
+
+            const replaceText = replaceInput.value;
+            let text = textEditor.value;
+            let lengthDiff = 0;
+
+            // Sort results by start index to replace correctly from beginning
+            const sortedResults = [...searchResults].sort((a, b) => a.start - b.start);
+
+            sortedResults.forEach(result => {
+                const adjustedStart = result.start + lengthDiff;
+                const adjustedEnd = result.end + lengthDiff;
+                text = text.substring(0, adjustedStart) + replaceText + text.substring(adjustedEnd);
+                lengthDiff += replaceText.length - (result.end - result.start);
+            });
+
+            textEditor.value = text;
+            clearSearch(); // Clear search state after replacing all
+            handleEditorInput(); // Update counts, save, push undo, etc.
+        }
+
+
+        // Editor Functions
+        function handleEditorInput() {
+            updateCounts();
+            saveToLocalStorage();
+            pushToUndoStack();
+            updateLineNumbers();
+            syncScrollHighlight(); // Sync highlight layer scroll
+            if (searchActive) { // Re-run search if active to update highlights
+                 performSearch();
+            }
+        }
+
+
+        function handleEditorKeydown(e) {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = textEditor.selectionStart;
+                const end = textEditor.selectionEnd;
+
+                textEditor.value = textEditor.value.substring(0, start) + '\t' + textEditor.value.substring(end);
+                textEditor.selectionStart = textEditor.selectionEnd = start + 1;
+
+                handleEditorInput(); // Use consolidated input handler
+            }
+        }
+
+        function updateCounts() {
+            const text = textEditor.value;
+            charCount.textContent = text.length;
+            wordCount.textContent = text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
+            lineCount.textContent = text === '' ? 0 : text.split('\n').length;
+        }
+
+        function updateCursorPosition() {
+            const text = textEditor.value.substring(0, textEditor.selectionStart);
+            const lineNumber = (text.match(/\n/g) || []).length + 1;
+            const lines = text.split('\n');
+            const columnNumber = lines[lines.length - 1].length + 1;
+            cursorPosition.textContent = `Ln ${lineNumber}, Col ${columnNumber}`;
+        }
+
+        function syncScrollHighlight() {
+            lineNumbers.scrollTop = textEditor.scrollTop;
+            textHighlightLayer.scrollTop = textEditor.scrollTop; // Sync highlight layer scroll
+        }
+
+
+        // Undo/Redo
+        function pushToUndoStack() {
+            // Avoid pushing duplicate states
+            if (undoStack.length === 0 || undoStack[undoStack.length - 1] !== textEditor.value) {
+                 undoStack.push(textEditor.value);
+                 redoStack = []; // Clear redo stack on new action
+                 updateUndoRedoButtons();
+            }
+        }
+
+
+        function undo() {
+            if (undoStack.length > 1) { // Need more than the initial state
+                const currentState = undoStack.pop();
+                redoStack.push(currentState);
+                const previousState = undoStack[undoStack.length - 1];
+                textEditor.value = previousState;
+                handleEditorInput(); // Update everything after undo
+                updateCursorPosition(); // Restore cursor position might be tricky, this is basic
+                updateUndoRedoButtons();
+            }
+        }
+
+        function redo() {
+            if (redoStack.length > 0) {
+                const state = redoStack.pop();
+                undoStack.push(state);
+                textEditor.value = state;
+                handleEditorInput(); // Update everything after redo
+                updateCursorPosition();
+                updateUndoRedoButtons();
+            }
+        }
+
+        function updateUndoRedoButtons() {
+            undoBtn.disabled = undoStack.length <= 1; // Disable if only initial state is present
+            redoBtn.disabled = redoStack.length === 0;
+        }
+
+        // UI Functions
+        function toggleDarkMode() {
+            isDarkMode = !isDarkMode;
+            document.body.classList.toggle('dark-mode');
+
+            if (isDarkMode) {
+                darkModeToggle.innerHTML = '<i class="fas fa-sun text-yellow-300"></i>';
+            } else {
+                darkModeToggle.innerHTML = '<i class="fas fa-moon text-gray-600"></i>';
+            }
+
+            // Save preference to localStorage
+            localStorage.setItem('docRegexEditorDarkMode', isDarkMode);
+        }
+
+        function toggleFullscreen() {
+            if (!isFullscreen) {
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen();
+                } else if (document.documentElement.webkitRequestFullscreen) {
+                    document.documentElement.webkitRequestFullscreen();
+                } else if (document.documentElement.msRequestFullscreen) {
+                    document.documentElement.msRequestFullscreen();
+                }
+                isFullscreen = true;
+                fullscreenToggle.innerHTML = '<i class="fas fa-compress text-gray-600"></i>';
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
+                isFullscreen = false;
+                fullscreenToggle.innerHTML = '<i class="fas fa-expand text-gray-600"></i>';
+            }
+        }
+
+        function insertSelectedRegex() {
+            const selection = window.getSelection();
+            if (selection && selection.toString()) {
+                searchInput.value = selection.toString();
+                regexCheckbox.checked = true;
+                performSearch();
+            }
+            regexHelpModal.classList.add('hidden');
+        }
+
+        // Utility Functions
+        function escapeRegExp(string) {
+            // Escape characters with special meaning in regex
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function handleSearchKeydown(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (searchResults.length > 0) {
+                    if (e.shiftKey) {
+                        navigateSearch(-1);
+                    } else {
+                        navigateSearch(1);
+                    }
+                } else {
+                    performSearch(); // Perform search if Enter is pressed and no results yet
+                }
+            }
+        }
+
+
+        function handleReplaceKeydown(e) {
+            if (e.key === 'Enter') { // Allow Replace with Enter
+                e.preventDefault();
+                replaceCurrent();
+            }
+        }
+
+
+        // Local Storage
+        function saveToLocalStorage() {
+            try {
+                localStorage.setItem('docRegexEditorContent', textEditor.value);
+                localStorage.setItem('docRegexEditorFileName', currentFile.name);
+            } catch (e) {
+                console.error("Could not save to localStorage:", e);
+                // Handle potential storage full errors or other issues
+            }
+        }
+
+
+        function loadFromLocalStorage() {
+            try {
+                const savedContent = localStorage.getItem('docRegexEditorContent') || '';
+                const savedName = localStorage.getItem('docRegexEditorFileName');
+                const savedDarkMode = localStorage.getItem('docRegexEditorDarkMode') === 'true';
+
+                textEditor.value = savedContent;
+                currentFile.content = savedContent;
+                currentFile.size = new Blob([savedContent]).size;
+                currentFile.name = savedName || 'Untitled.txt';
+
+                fileName.textContent = currentFile.name;
+                fileSize.textContent = formatFileSize(currentFile.size);
+                updateCounts();
+                pushToUndoStack(); // Push initial state to undo stack
+
+                if (savedDarkMode) {
+                    toggleDarkMode(); // Apply saved dark mode state
+                }
+
+            } catch (e) {
+                console.error("Could not load from localStorage:", e);
+            }
+        }
+
+
+        // Autosave feature
+        function setupAutosave() {
+            // Autosave every 30 seconds if content has changed
+            autosaveTimer = setInterval(() => {
+                 const currentContent = textEditor.value;
+                 const lastSavedContent = localStorage.getItem('docRegexEditorContent');
+                 if (currentContent !== lastSavedContent) {
+                     saveToLocalStorage();
+                     showAutosaveIndicator();
+                 }
+             }, 30000); // 30 seconds
+        }
+
+        function showAutosaveIndicator() {
+            autosaveIndicator.classList.add('visible');
+            setTimeout(() => {
+                autosaveIndicator.classList.remove('visible');
+            }, 2000); // Show for 2 seconds
+        }
+
+        // Line numbers implementation
+        function updateLineNumbers() {
+            const lines = textEditor.value.split('\n');
+            // Ensure there's always at least one line number, even for empty editor
+            const lineCount = Math.max(1, lines.length);
+            let lineNumbersHTML = '';
+
+            for (let i = 1; i <= lineCount; i++) {
+                lineNumbersHTML += `<div>${i}</div>`;
+            }
+
+            // Add an extra line number div if the last line is not empty,
+            // to account for the cursor potentially being on a new line after the last character.
+            // Or if the editor is empty, show '1'.
+            if (textEditor.value.endsWith('\n') && textEditor.value.length > 0) {
+                 lineNumbersHTML += `<div>${lineCount + 1}</div>`;
+            } else if (textEditor.value.length === 0) {
+                 lineNumbers.innerHTML = '<div>1</div>'; // Special case for empty editor
+                 return;
+            }
+
+
+            lineNumbers.innerHTML = lineNumbersHTML;
+
+            // Sync scroll position
+            lineNumbers.scrollTop = textEditor.scrollTop;
+        }
+
+        // PDF text extraction
+        function extractTextFromPDF(pdfUrl) {
+            const loadingTask = pdfjsLib.getDocument(pdfUrl);
+            return loadingTask.promise.then(function(pdf) {
+                let allText = '';
+                let pagePromises = [];
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    pagePromises.push(
+                        pdf.getPage(i).then(function(page) {
+                            return page.getTextContent().then(function(textContent) {
+                                // Join items with space, handle potential undefined items
+                                return textContent.items.map(item => item.str || '').join(' ');
+                            });
+                        })
+                    );
+                }
+
+                return Promise.all(pagePromises).then(function(texts) {
+                    // Join pages with double newline
+                    return texts.join('\n\n');
+                });
+            }).catch(error => {
+                console.error("Error extracting text from PDF:", error);
+                return ""; // Return empty string on error
+            });
+        }
+    </script>
+</body>
+</html>
